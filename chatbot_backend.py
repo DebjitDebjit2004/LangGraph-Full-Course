@@ -4,7 +4,10 @@ from typing import TypedDict, Annotated
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
-from langgraph.checkpoint.memory import InMemorySaver 
+# from langgraph.checkpoint.memory import InMemorySaver 
+from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
+
 
 load_dotenv()
 
@@ -26,7 +29,11 @@ def chat_node(state: ChatState):
     # response store into the state
     return {'message': [response]}
 
-checkpointer = InMemorySaver()
+connection = sqlite3.connect(database='chatbot.db', check_same_thread=False)
+
+# checkpointer
+# checkpointer = InMemorySaver()
+checkpointer = SqliteSaver(conn = connection)
 graph = StateGraph(ChatState)
 
 # add node
@@ -37,6 +44,13 @@ graph.add_edge('chat_node', END)
 
 chatbot = graph.compile(checkpointer=checkpointer)
 
+def retrive_all_threads():
+    all_threads = set()
+    for checkpoint in checkpointer.list(None):
+        all_threads.add(checkpoint.config['configurable']['thread_id'])
+    return list(all_threads)
+
+retrive_all_threads()
 
 # thread_id = '1'
 # while True:
