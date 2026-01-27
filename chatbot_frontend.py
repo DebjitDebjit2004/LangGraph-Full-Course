@@ -1,26 +1,25 @@
 import streamlit as st
-from chatbot_backend import chatbot, retrive_all_threads
-from langchain_core.messages import HumanMessage
+from chatbot_backend import chatbot, retrieve_all_threads
+from langchain_core.messages import HumanMessage, AIMessage
 import uuid
 
 # ******************************** utility functions **************************************
 def generate_thread_id():
-    thread_id = uuid.uuid4()
-    return thread_id
-
-def reset_chat():
-    thread_id = generate_thread_id()
-    st.session_state['thread_id'] = thread_id
-    add_thread(st.session_state['thread_id'])
-    st.session_state['message_history'] = []
+    return str(uuid.uuid4())
 
 def add_thread(thread_id):
     if thread_id not in st.session_state['chat_threads']:
         st.session_state['chat_threads'].append(thread_id)
 
+def reset_chat():
+    thread_id = generate_thread_id()
+    st.session_state['thread_id'] = thread_id
+    add_thread(thread_id)
+    st.session_state['message_history'] = []
+
 def load_conversation_by_thread_id(thread_id):
     state = chatbot.get_state(config={'configurable': {'thread_id': thread_id}})
-    return state.values.get('message', [])
+    return state.values.get('messages', [])
 
 
 # ******************************* session setup *******************************************
@@ -31,74 +30,85 @@ if 'thread_id' not in st.session_state:
     st.session_state['thread_id'] = generate_thread_id()
 
 if 'chat_threads' not in st.session_state:
-    st.session_state['chat_threads'] = retrive_all_threads()
+    st.session_state['chat_threads'] = retrieve_all_threads()
 
 add_thread(st.session_state['thread_id'])
 
 
-# ******************************** Slidebar ui *******************************************
-st.sidebar.title('Langgraph Chatbot')
+# ******************************** Sidebar UI *******************************************
+st.sidebar.title("LangGraph Chatbot")
 
-if st.sidebar.button('New Chat'):
+if st.sidebar.button("➕ New Chat", key="new_chat_btn"):
     reset_chat()
 
-st.sidebar.header('My Conversations')
+st.sidebar.divider()
+st.sidebar.subheader("💬 My Conversations")
 
 for thread_id in st.session_state['chat_threads']:
+
     state = chatbot.get_state(config={'configurable': {'thread_id': thread_id}})
-    short_msg =  state.values.get('message', [])
+    messages = state.values.get("messages", [])
 
-    if len(short_msg) != 0:
-        heading = short_msg[0].content
+    if messages:
+        heading = messages[0].content[:30]
     else:
-        heading = None
+        heading = "New Conversation"
 
-    if st.sidebar.button(str(heading)):
+    # ✅ UNIQUE KEY FIX
+    if st.sidebar.button(
+        heading,
+        key=f"thread_btn_{thread_id}"
+    ):
         st.session_state['thread_id'] = thread_id
-        messages = load_conversation_by_thread_id(thread_id)
 
         temp_messages = []
-
         for msg in messages:
-            if isinstance(msg, HumanMessage):
-                role='user'
-            else:
-                role='assistant'
-            temp_messages.append({'role': role, 'content': msg.content})
+            role = "user" if isinstance(msg, HumanMessage) else "assistant"
+            temp_messages.append({
+                "role": role,
+                "content": msg.content
+            })
 
         st.session_state['message_history'] = temp_messages
-    
 
-# loading the conversation history
+
+# ******************************** Chat UI *******************************************
 for message in st.session_state['message_history']:
     with st.chat_message(message['role']):
-        st.text(message['content'])
+        st.markdown(message['content'])
 
-#{'role': 'user', 'content': 'Hi'}
-#{'role': 'assistant', 'content': 'Hi=ello'}
-
-user_input = st.chat_input('Type here')
+user_input = st.chat_input("Type your message...")
 
 if user_input:
+    # show user message
+    st.session_state['message_history'].append({
+        "role": "user",
+        "content": user_input
+    })
 
-    # first add the message to message_history
-    st.session_state['message_history'].append({'role': 'user', 'content': user_input})
-    with st.chat_message('user'):
-        st.text(user_input)
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    CONFIG = {'configurable': {'thread_id': st.session_state['thread_id']}}
+    CONFIG = {
+        "configurable": {
+            "thread_id": st.session_state['thread_id']
+        }
+    }
 
-    # first add the message to message_history
-    with st.chat_message('assistant'):
+    with st.chat_message("assistant"):
 
-        ai_message = st.write_stream(
-            message_chunk.content
-            for message_chunk, metadata in chatbot.stream(
-                {"message": [HumanMessage(content=user_input)]},
+        def ai_stream():
+            for chunk, _ in chatbot.stream(
+                {"messages": [HumanMessage(content=user_input)]},
                 config=CONFIG,
                 stream_mode="messages"
-            )
-        )
+            ):
+                if isinstance(chunk, AIMessage):
+                    yield chunk.content
 
+        ai_response = st.write_stream(ai_stream)
 
-    st.session_state['message_history'].append({'role': 'assistant', 'content': ai_message})
+    st.session_state['message_history'].append({
+        "role": "assistant",
+        "content": ai_response
+    })
